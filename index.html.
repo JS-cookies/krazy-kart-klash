@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Krazy Kart Klash Ultimate</title>
+<style>
+body { margin:0; overflow:hidden; font-family:'Arial Black', sans-serif; background:#87ceeb; }
+#menu {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  background: rgba(0,0,0,0.9); color:white; padding:30px; border-radius:15px;
+  text-align:center; width:520px; box-shadow:0 0 25px #000;
+}
+#menu h1 {
+  font-size:52px; margin-bottom:20px; color:#ffdd33; text-shadow:3px 3px 8px #000;
+}
+button {
+  font-size:22px; margin:12px; padding:12px 25px; border:none; border-radius:12px;
+  cursor:pointer; background:#ff6600; color:white; font-weight:bold;
+  transition:0.2s;
+}
+button:hover { background:#ffaa33; }
+#hud {
+  position:absolute; top:10px; left:10px; color:white; font-size:22px; z-index:100;
+  background: rgba(0,0,0,0.6); padding:10px; border-radius:10px;
+}
+#minimapCanvas { position:absolute; bottom:10px; right:10px; width:200px; height:200px;
+  background:rgba(0,0,0,0.7); border:2px solid white; border-radius:10px; }
+#volumeControl { position:absolute; top:10px; right:10px; z-index:100; }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>Krazy Kart Klash</h1>
+  <div id="racerSelect">Racer: Nate</div>
+  <div id="kartSelect">Kart: Rocket Racer</div>
+  <div id="trackSelect">Track: Forest Loop</div>
+  <div id="volumeControl">
+    Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50">
+  </div>
+  <button id="startRace">Start Race</button>
+</div>
+
+<div id="hud">
+  <div id="lap">Lap: 1/3</div>
+  <div id="position">Position: 1/20</div>
+  <div id="speed">Speed: 0</div>
+  <div id="item">Item: None</div>
+  <div id="item2">Item 2: None</div>
+  <div id="event">Event: None</div>
+</div>
+
+<canvas id="minimapCanvas"></canvas>
+
+<!-- Music and SFX -->
+<audio id="raceMusic" loop src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_3b40b2b91b.mp3?filename=cartoon-race-loop-1145.mp3"></audio>
+<audio id="menuMusic" loop src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_c2710c1f44.mp3?filename=cartoon-menu-loop-1143.mp3"></audio>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+
+<script>
+// ==================== GLOBALS ====================
+let scene, camera, renderer;
+let karts=[], playerKart;
+let keys={};
+let hud={
+  lap: document.getElementById('lap'),
+  position: document.getElementById('position'),
+  speed: document.getElementById('speed'),
+  item: document.getElementById('item'),
+  item2: document.getElementById('item2'),
+  event: document.getElementById('event')
+};
+let menu=document.getElementById('menu');
+let startRaceBtn=document.getElementById('startRace');
+const minimapCanvas=document.getElementById('minimapCanvas');
+const minimapCtx=minimapCanvas.getContext('2d');
+const volumeSlider=document.getElementById('volumeSlider');
+const raceMusic=document.getElementById('raceMusic');
+const menuMusic=document.getElementById('menuMusic');
+
+// ==================== INPUT ====================
+document.addEventListener("keydown", e=>keys[e.key.toLowerCase()]=true);
+document.addEventListener("keyup", e=>keys[e.key.toLowerCase()]=false);
+
+// ==================== RACERS ====================
+const racerData=[ 
+{name:"Nate", legendary:true, speed:5, accel:5, handling:5, special:"doubleBackflip"},
+{name:"Zippy Cat", legendary:false, speed:4, accel:3, handling:5, special:"itemSteal"},
+{name:"Turbo Turtle", legendary:false, speed:2, accel:2, handling:3, special:"randomJump"},
+{name:"Robot Rex", legendary:false, speed:5, accel:4, handling:2, special:"straightBoost"},
+{name:"Banana Bill", legendary:false, speed:3, accel:5, handling:4, special:"bananaTrail"},
+{name:"Disco Duck", legendary:false, speed:4, accel:4, handling:3, special:"spinAttack"},
+{name:"Fire Fox", legendary:false, speed:5, accel:4, handling:5, special:"flameDash"},
+{name:"Crazy Chicken", legendary:false, speed:3, accel:5, handling:4, special:"eggDrop"},
+{name:"Mega Mole", legendary:false, speed:2, accel:3, handling:5, special:"digTunnel"},
+{name:"Laser Llama", legendary:false, speed:4, accel:4, handling:4, special:"laserBlast"},
+{name:"Ghost Goat", legendary:false, speed:5, accel:5, handling:3, special:"phaseThrough"},
+{name:"Slime Sam", legendary:false, speed:3, accel:3, handling:5, special:"stickyTrail"},
+{name:"Rocket Rabbit", legendary:false, speed:5, accel:4, handling:5, special:"rocketBoost"},
+{name:"Ice Iguana", legendary:false, speed:4, accel:3, handling:2, special:"slide"},
+{name:"Thunder Tiger", legendary:false, speed:5, accel:5, handling:4, special:"zapAttack"},
+{name:"Jumpy Jaguar", legendary:false, speed:4, accel:4, handling:5, special:"superJump"},
+{name:"Shadow Sheep", legendary:false, speed:3, accel:4, handling:5, special:"shadowTrail"},
+{name:"Vortex Vulture", legendary:false, speed:4, accel:5, handling:3, special:"windGust"},
+{name:"Candy Crab", legendary:false, speed:2, accel:4, handling:4, special:"candyDrop"},
+{name:"Pixel Penguin", legendary:false, speed:4, accel:3, handling:5, special:"iceSlide"}];
+
+// ==================== KART CLASS ====================
+class Kart{
+  constructor(racer,isPlayer=false){
+    this.racer=racer; this.name=racer.name; this.isPlayer=isPlayer;
+    this.legendary=racer.legendary; this.speed=racer.speed/5; this.accel=racer.accel/5; this.handling=racer.handling/5;
+    this.special=racer.special;
+    this.body=new THREE.Mesh(new THREE.BoxGeometry(1,0.5,2),
+      new THREE.MeshStandardMaterial({color:isPlayer?0xff0000:this.legendary?0x0000ff:0x00ff00}));
+    this.body.position.y=0.25;
+    this.wheels=[];
+    const wheelMat=new THREE.MeshStandardMaterial({color:0x333333});
+    for(let dx of [-0.5,0.5]){
+      for(let dz of [-0.8,0.8]){
+        let wheel=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.2,0.1,16), wheelMat);
+        wheel.rotation.z=Math.PI/2; wheel.position.set(dx,0.1,dz);
+        scene.add(wheel);
+        this.wheels.push(wheel);
+      }
+    }
+    scene.add(this.body);
+    this.item1=null; this.item2=null;
+    this.stuckTimer=0; this.lap=1; this.position=1; this.boosting=false;
+    this.particles=[];
+  }
+  update(){
+    if(this.stuckTimer>0){this.stuckTimer-=1; return;}
+    if(this.isPlayer){
+      if(keys["arrowup"]){this.body.position.z-=this.speed; this.boosting=true;}
+      else this.boosting=false;
+      if(keys["arrowdown"]){this.body.position.z+=this.speed;}
+      if(keys["arrowleft"]){this.body.position.x-=this.handling*0.1;}
+      if(keys["arrowright"]){this.body.position.x+=this.handling*0.1;}
+      if(keys[" "] && this.body.position.y<=0.25){this.body.position.y+=0.5;}
+      else if(this.body.position.y>0.25){this.body.position.y-=0.05;}
+      if(keys["control"] && keys[" "] && this.body.position.y>0.25){
+        if(this.legendary && Math.random()<0.3){ 
+          console.log("Nate double backflip!"); hud.event.innerText="Nate did Double Backflip!"; 
+          let fanfare=new Audio("https://cdn.pixabay.com/download/audio/2022/03/15/audio_heroic-1150.mp3?filename=heroic-fanfare-1150.mp3");
+          fanfare.volume=volumeSlider.value/100; fanfare.play();
+        } else if(this.legendary){ 
+          this.stuckTimer=5*60; hud.event.innerText="Nate fumbled!"; 
+        }
+      }
+      if(keys["shift"] && this.item1){ this.item1.activate(this); this.item1=null; hud.item.innerText="Item: None";}
+      else if(keys["shift"] && this.item2){ this.item2.activate(this); this.item2=null; hud.item2.innerText="Item 2: None";}
+    } else { this.body.position.z -= this.speed*0.8 + Math.random()*0.05;}
+    this.wheels.forEach(w=>w.rotation.x-=this.speed*5);
+    if(this.boosting){this.spawnParticles();}
+    this.updateParticles();
+    hud.speed.innerText = "Speed: "+(this.speed*50).toFixed(0);
+  }
+  spawnParticles(){ let p={x:this.body.position.x,y:this.body.position.y,z:this.body.position.z,life:20}; this.particles.push(p);}
+  updateParticles(){ this.particles.forEach(p=>{p.life--; if(p.life<=0){this.particles.splice(this.particles.indexOf(p),1);}});}
+}
+
+// ==================== MINIMAP ====================
+function drawMinimap(){
+  minimapCtx.clearRect(0,0,200,200);
+  karts.forEach(k=>{
+    minimapCtx.fillStyle=k.isPlayer?"red":k.legendary?"blue":"green";
+    let x=(k.body.position.x/30 +0.5)*200;
+    let y=(-k.body.position.z/300 +0.5)*200;
+    minimapCtx.beginPath();
+    minimapCtx.arc(x,y,5,0,Math.PI*2);
+    minimapCtx.fill();
+  });
+}
+
+// ==================== TRACKS ====================
+function generateTrack(index){
+  let group=new THREE.Group();
+  let mat=new THREE.MeshStandardMaterial({color:0x555555});
+  for(let i=0;i<300;i+=10){
+    let seg=new THREE.Mesh(new THREE.BoxGeometry(10,1,10),mat);
+    seg.position.z=-i; seg.position.x=Math.sin(i/50)*15; seg.rotation.y=Math.sin(i/50)*0.2;
+    group.add(seg);
+    if(i%50===0){
+      let ramp=new THREE.Mesh(new THREE.BoxGeometry(4,0.5,4), new THREE.MeshStandardMaterial({color:0xffaa00}));
+      ramp.position.z=-i-5; ramp.position.x=0; ramp.position.y=0.25; ramp.rotation.x=-0.3; group.add(ramp);
+    }
+  }
+  return group;
+}
+
+// ==================== SCENE ====================
+scene=new THREE.Scene(); scene.background=new THREE.Color(0x87ceeb);
+camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(window.innerWidth,window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const ambientLight=new THREE.AmbientLight(0xffffff,0.6); scene.add(ambientLight);
+const light=new THREE.DirectionalLight(0xffffff,1); light.position.set(10,20,10); scene.add(light);
+
+// ==================== CREATE TRACKS ====================
+for(let i=0;i<20;i++){scene.add(generateTrack(i));}
+
+// ==================== CREATE KARTS ====================
+playerKart=new Kart(racerData[0],true); karts.push(playerKart);
+for(let i=1;i<20;i++){ karts.push(new Kart(racerData[i]));}
+
+// ==================== CAMERA ====================
+camera.position.set(0,5,10); camera.lookAt(playerKart.body.position);
+
+// ==================== ANIMATION LOOP ====================
+function animate(){
+  requestAnimationFrame(animate);
+  karts.forEach(k=>k.update());
+  drawMinimap();
+  camera.position.x=playerKart.body.position.x;
+  camera.position.z=playerKart.body.position.z+10;
+  camera.lookAt(playerKart.body.position);
+  renderer.render(scene,camera);
+}
+animate();
+
+// ==================== MENU ====================
+startRaceBtn.addEventListener("click",()=>{
+  menu.style.display="none";
+  menuMusic.pause();
+  raceMusic.volume=volumeSlider.value/100; raceMusic.play();
+});
+volumeSlider.addEventListener("input",()=>{
+  raceMusic.volume=volumeSlider.value/100;
+  menuMusic.volume=volumeSlider.value/100;
+});
+menuMusic.volume=volumeSlider.value/100; menuMusic.play();
+
+</script>
+</body>
+</html>
